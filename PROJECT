@@ -1,0 +1,3 @@
+domain: io.spiffe
+repo: github.com/transferwise/spire-k8s-registrar
+version: "2"
