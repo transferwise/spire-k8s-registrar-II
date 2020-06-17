@@ -102,6 +102,7 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	parentId := r.makeParentId(obj)
 	if spiffeId == "" || parentId == "" {
 		// Object does not need an entry. This might be a change, so we need to delete any hanging entries.
+		reqLogger.V(1).Info("Deleting entries for pod that no longer needs an ID", "count", len(matchedEntries))
 		err := r.deleteAllEntries(ctx, reqLogger, matchedEntries)
 		return ctrl.Result{}, err
 	}
@@ -122,6 +123,8 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		}
 		if !createEntryIfNotExistsResponse.Preexisting {
 			reqLogger.Info("Created new spire entry", "entry", createEntryIfNotExistsResponse.Entry)
+		} else {
+			reqLogger.V(1).Info("Found existing identical spire entry", "entry", createEntryIfNotExistsResponse.Entry)
 		}
 		myEntryId = createEntryIfNotExistsResponse.Entry.EntryId
 	} else {
@@ -129,6 +132,7 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		requiresUpdate := true
 		for _, entry := range matchedEntries {
 			if entry.SpiffeId == spiffeId {
+				reqLogger.V(1).Info("Found existing identical enough spire entry", "entry", entry.EntryId)
 				// TODO: Maybe this should be stricter on the other fields, but right now if you're editing entries on the server, I'll accept that odd things happen to you.
 				myEntryId = entry.EntryId
 				requiresUpdate = false
@@ -136,7 +140,10 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			}
 		}
 		if requiresUpdate {
-			myEntry.EntryId = matchedEntries[0].EntryId
+			reqLogger.V(1).Info("Updating existing spire entry to match desired state", "entry", matchedEntries[0].EntryId)
+			myEntryId = matchedEntries[0].EntryId
+
+			myEntry.EntryId = myEntryId
 			_, err := r.SpireClient.UpdateEntry(ctx, &registration.UpdateEntryRequest{
 				Entry: &myEntry,
 			})
