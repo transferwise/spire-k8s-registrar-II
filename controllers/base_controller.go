@@ -134,6 +134,12 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		}
 		if requiresUpdate {
 			reqLogger.V(1).Info("Updating existing spire entry to match desired state", "entry", matchedEntries[0].EntryId)
+			// It's important that if multiple instances are running they all pick the same entry here, otherwise
+			// we could have two instances of the registrar delete each others changes. This can only happen if both are
+			// also working off an up to date cache (otherwise the lagging one will pick up the other change later and correct
+			// the mistake.) If that happens then as long as the list of entries is always in the same order, we can guarantee they
+			// wont end up deleting all the entries and not noticing.
+			// TODO: Check that spire-server provides a stable sort order, or sort it ourselves!
 			myEntryId = matchedEntries[0].EntryId
 
 			myEntry.EntryId = myEntryId
