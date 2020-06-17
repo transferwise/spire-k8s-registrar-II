@@ -98,9 +98,9 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	spiffeId := r.makeSpiffeId(obj)
-	parentId := r.makeParentId(obj)
-	if spiffeId == "" || parentId == "" {
+	myEntry := r.makeEntryForObject(obj)
+
+	if myEntry == nil {
 		// Object does not need an entry. This might be a change, so we need to delete any hanging entries.
 		reqLogger.V(1).Info("Deleting entries for pod that no longer needs an ID", "count", len(matchedEntries))
 		err := r.deleteAllEntries(ctx, reqLogger, matchedEntries)
@@ -109,14 +109,8 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	var myEntryId string
 
-	myEntry := common.RegistrationEntry{
-		Selectors: r.getSelectors(req.NamespacedName),
-		ParentId:  r.makeParentId(obj),
-		SpiffeId:  spiffeId,
-	}
-
 	if len(matchedEntries) == 0 {
-		createEntryIfNotExistsResponse, err := r.SpireClient.CreateEntryIfNotExists(ctx, &myEntry)
+		createEntryIfNotExistsResponse, err := r.SpireClient.CreateEntryIfNotExists(ctx, myEntry)
 		if err != nil {
 			reqLogger.Error(err, "Failed to create or update spire entry")
 			return ctrl.Result{}, err
@@ -131,9 +125,8 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		// One of the existing entries might already be just right for me... if not, we can choose one and update it
 		requiresUpdate := true
 		for _, entry := range matchedEntries {
-			if entry.SpiffeId == spiffeId {
+			if r.entryEquals(myEntry, entry) {
 				reqLogger.V(1).Info("Found existing identical enough spire entry", "entry", entry.EntryId)
-				// TODO: Maybe this should be stricter on the other fields, but right now if you're editing entries on the server, I'll accept that odd things happen to you.
 				myEntryId = entry.EntryId
 				requiresUpdate = false
 				break
@@ -145,7 +138,7 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 			myEntry.EntryId = myEntryId
 			_, err := r.SpireClient.UpdateEntry(ctx, &registration.UpdateEntryRequest{
-				Entry: &myEntry,
+				Entry: myEntry,
 			})
 			if err != nil {
 				reqLogger.Error(err, "Failed to update existing spire entry", "existingEntry", matchedEntries[0].EntryId)
@@ -157,6 +150,29 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	err = r.deleteAllEntriesExcept(ctx, reqLogger, matchedEntries, myEntryId)
 
 	return ctrl.Result{}, err
+}
+
+func (r *BaseReconciler) makeEntryForObject(obj ObjectWithMetadata) *common.RegistrationEntry {
+	spiffeId := r.makeSpiffeId(obj)
+	parentId := r.makeParentId(obj)
+
+	if spiffeId == "" || parentId == "" {
+		return nil
+	}
+
+	return &common.RegistrationEntry{
+		Selectors: r.getSelectors(types.NamespacedName{
+			Namespace: obj.GetNamespace(),
+			Name:      obj.GetName(),
+		}),
+		ParentId: parentId,
+		SpiffeId: spiffeId,
+	}
+}
+
+func (r *BaseReconciler) entryEquals(myEntry *common.RegistrationEntry, b *common.RegistrationEntry) bool {
+	// TODO: Maybe this should be stricter on the other fields, but right now if you're editing entries on the server, I'll accept that odd things happen to you.
+	return b.SpiffeId == myEntry.GetSpiffeId()
 }
 
 func (r *BaseReconciler) deleteAllEntries(ctx context.Context, reqLogger logr.Logger, entries []*common.RegistrationEntry) error {
@@ -259,8 +275,10 @@ func (r *BaseReconciler) pollSpire(out chan event.GenericEvent, s <-chan struct{
 								log.Error(err, "Unable to fetch resource", "name", namespacedName)
 							}
 						} else {
-							if r.makeSpiffeId(obj) == "" {
-								// No longer needs an entry
+							myEntry := r.makeEntryForObject(obj)
+							if myEntry == nil || !r.entryEquals(myEntry, entry) {
+								// No longer needs an entry or it doesn't match the expected entry
+								// This can trigger for various reasons, but it's OK to accidentally queue more than entirely necessary
 								reconcile = true
 							}
 						}
