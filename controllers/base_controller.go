@@ -207,7 +207,7 @@ func (r *BaseReconciler) pollSpire(out chan event.GenericEvent, s <-chan struct{
 				log.Error(err, "Unable to fetch entries")
 				break
 			}
-			reconciled := 0
+			queued := 0
 			for _, entry := range entries {
 				if namespacedName := r.selectorsToNamespacedName(entry.Selectors); namespacedName != nil {
 					reconcile := false
@@ -233,7 +233,7 @@ func (r *BaseReconciler) pollSpire(out chan event.GenericEvent, s <-chan struct{
 					}
 					seen[namespacedName.String()] = true
 					if reconcile {
-						reconciled++
+						queued++
 						log.V(1).Info("Triggering reconciliation for resource", "name", namespacedName)
 						out <- event.GenericEvent{Meta: &v1.ObjectMeta{
 							Name:      namespacedName.Name,
@@ -242,7 +242,7 @@ func (r *BaseReconciler) pollSpire(out chan event.GenericEvent, s <-chan struct{
 					}
 				}
 			}
-			log.Info("Synced spire entries", "took", time.Since(start), "found", len(entries), "queued", reconciled)
+			log.Info("Synced spire entries", "took", time.Since(start), "found", len(entries), "queued", queued)
 		}
 	}
 }
