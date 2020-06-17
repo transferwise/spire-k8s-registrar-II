@@ -106,28 +106,55 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	createEntryIfNotExistsResponse, err := r.SpireClient.CreateEntryIfNotExists(ctx, &common.RegistrationEntry{
+	var myEntryId string
+
+	myEntry := common.RegistrationEntry{
 		Selectors: r.getSelectors(req.NamespacedName),
 		ParentId:  r.makeParentId(obj),
 		SpiffeId:  spiffeId,
-	})
-
-	if err != nil {
-		reqLogger.Error(err, "Failed to create or update spire entry")
-		return ctrl.Result{}, err
-	}
-	if !createEntryIfNotExistsResponse.Preexisting {
-		reqLogger.Info("Created new spire entry", "entry", createEntryIfNotExistsResponse.Entry)
 	}
 
-	err = r.deleteAllEntriesExcept(ctx, reqLogger, matchedEntries, createEntryIfNotExistsResponse.Entry.EntryId)
+	if len(matchedEntries) == 0 {
+		createEntryIfNotExistsResponse, err := r.SpireClient.CreateEntryIfNotExists(ctx, &myEntry)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create or update spire entry")
+			return ctrl.Result{}, err
+		}
+		if !createEntryIfNotExistsResponse.Preexisting {
+			reqLogger.Info("Created new spire entry", "entry", createEntryIfNotExistsResponse.Entry)
+		}
+		myEntryId = createEntryIfNotExistsResponse.Entry.EntryId
+	} else {
+		// One of the existing entries might already be just right for me... if not, we can choose one and update it
+		requiresUpdate := true
+		for _, entry := range matchedEntries {
+			if entry.SpiffeId == spiffeId {
+				// TODO: Maybe this should be stricter on the other fields, but right now if you're editing entries on the server, I'll accept that odd things happen to you.
+				myEntryId = entry.EntryId
+				requiresUpdate = false
+				break
+			}
+		}
+		if requiresUpdate {
+			myEntry.EntryId = matchedEntries[0].EntryId
+			_, err := r.SpireClient.UpdateEntry(ctx, &registration.UpdateEntryRequest{
+				Entry: &myEntry,
+			})
+			if err != nil {
+				reqLogger.Error(err, "Failed to update existing spire entry", "existingEntry", matchedEntries[0].EntryId)
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
+	err = r.deleteAllEntriesExcept(ctx, reqLogger, matchedEntries, myEntryId)
 
 	return ctrl.Result{}, err
 }
 
-func (r *BaseReconciler) deleteAllEntries(ctx context.Context, reqLogger logr.Logger, entryIds []string) error {
-	for _, entry := range entryIds {
-		err := r.ensureDeleted(ctx, reqLogger, entry)
+func (r *BaseReconciler) deleteAllEntries(ctx context.Context, reqLogger logr.Logger, entries []*common.RegistrationEntry) error {
+	for _, entry := range entries {
+		err := r.ensureDeleted(ctx, reqLogger, entry.EntryId)
 		if err != nil {
 			return err
 		}
@@ -135,10 +162,10 @@ func (r *BaseReconciler) deleteAllEntries(ctx context.Context, reqLogger logr.Lo
 	return nil
 }
 
-func (r *BaseReconciler) deleteAllEntriesExcept(ctx context.Context, reqLogger logr.Logger, entryIds []string, skip string) error {
-	for _, entry := range entryIds {
-		if entry != skip {
-			err := r.ensureDeleted(ctx, reqLogger, entry)
+func (r *BaseReconciler) deleteAllEntriesExcept(ctx context.Context, reqLogger logr.Logger, entries []*common.RegistrationEntry, skip string) error {
+	for _, entry := range entries {
+		if entry.EntryId != skip {
+			err := r.ensureDeleted(ctx, reqLogger, entry.EntryId)
 			if err != nil {
 				return err
 			}
@@ -147,7 +174,7 @@ func (r *BaseReconciler) deleteAllEntriesExcept(ctx context.Context, reqLogger l
 	return nil
 }
 
-func (r *BaseReconciler) getMatchingEntries(ctx context.Context, reqLogger logr.Logger, namespacedName types.NamespacedName) ([]string, error) {
+func (r *BaseReconciler) getMatchingEntries(ctx context.Context, reqLogger logr.Logger, namespacedName types.NamespacedName) ([]*common.RegistrationEntry, error) {
 	entries, err := r.SpireClient.ListBySelectors(ctx, &common.Selectors{
 		Entries: r.getSelectors(namespacedName),
 	})
@@ -155,10 +182,10 @@ func (r *BaseReconciler) getMatchingEntries(ctx context.Context, reqLogger logr.
 		reqLogger.Error(err, "Failed to load entries")
 		return nil, err
 	}
-	var result []string
+	var result []*common.RegistrationEntry
 	for _, entry := range entries.Entries {
 		if strings.HasPrefix(entry.ParentId, r.RootId) {
-			result = append(result, entry.EntryId)
+			result = append(result, entry)
 		}
 	}
 	return result, nil
