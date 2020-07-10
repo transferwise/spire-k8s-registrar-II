@@ -24,6 +24,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlBuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strings"
 )
@@ -88,6 +90,14 @@ func (r *NodeReconciler) selectorsToNamespacedName(selectors []*common.Selector)
 			Name:      nodeName,
 		}
 	}
+	return nil
+}
+
+func (r *NodeReconciler) fillEntryForObject(_ context.Context, entry *common.RegistrationEntry, _ ObjectWithMetadata) (*common.RegistrationEntry, error) {
+	return entry, nil
+}
+
+func (r *NodeReconciler) SetupWithManager(_ ctrl.Manager, _ *ctrlBuilder.Builder) error {
 	return nil
 }
 

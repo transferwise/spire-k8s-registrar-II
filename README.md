@@ -33,6 +33,9 @@ The configuration file is a **required** by the registrar. It contains
 | `pod_annotation`           | string  | optional | The pod annotation used for [Annotation Based Workload Registration](#annotation-based-workload-registration) | |
 | `controller_name`          | string  | optional | Forms part of the spiffe IDs used for parent IDs | `"spire-k8s-registrar"` |
 | `leader_election`          | bool    | optional | Enable/disable leader election. Enable if you have multiple registrar replicas running. | false |
+| `add_pod_dns_names`        | bool    | optional | Enable/disable adding k8s DNS names to pod SVIDs. | false |
+| `cluster_dns_zone`         | string  | optional | The DNS zone used for services in the k8s cluster. | `"cluster.local"` |
+
 ### Example
 
 ```

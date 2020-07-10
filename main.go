@@ -125,6 +125,8 @@ func main() {
 		spireClient,
 		mode,
 		value,
+		config.ClusterDnsZone,
+		config.AddPodDnsNames,
 	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create controller", "controller", "Pod")
 		os.Exit(1)

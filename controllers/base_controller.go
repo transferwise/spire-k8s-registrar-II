@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlBuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -51,6 +52,10 @@ type ObjectReconciler interface {
 	// Parse the selectors to extract a namespaced name.
 	// For example, a list containing a `k8s_psat:node-name:foo` selector might result in a NamespacedName of "foo"
 	selectorsToNamespacedName([]*common.Selector) *types.NamespacedName
+	// Fill additional fields on a spire registration entry for a k8s object
+	fillEntryForObject(context.Context, *common.RegistrationEntry, ObjectWithMetadata) (*common.RegistrationEntry, error)
+	// Do any additional manager setup required
+	SetupWithManager(ctrl.Manager, *ctrlBuilder.Builder) error
 }
 
 // BaseReconciler reconciles... something
@@ -99,7 +104,11 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	myEntry := r.makeEntryForObject(obj)
+	myEntry, err := r.makeEntryForObject(ctx, obj)
+	if err != nil {
+		reqLogger.Error(err, "Failed to populate spire entry for object")
+		return ctrl.Result{}, err
+	}
 
 	if myEntry == nil {
 		// Object does not need an entry. This might be a change, so we need to delete any hanging entries.
@@ -171,15 +180,15 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	return ctrl.Result{}, err
 }
 
-func (r *BaseReconciler) makeEntryForObject(obj ObjectWithMetadata) *common.RegistrationEntry {
+func (r *BaseReconciler) makeEntryForObject(ctx context.Context, obj ObjectWithMetadata) (*common.RegistrationEntry, error) {
 	spiffeId := r.makeSpiffeId(obj)
 	parentId := r.makeParentId(obj)
 
 	if spiffeId == "" || parentId == "" {
-		return nil
+		return nil, nil
 	}
 
-	return &common.RegistrationEntry{
+	entry := common.RegistrationEntry{
 		Selectors: r.getSelectors(types.NamespacedName{
 			Namespace: obj.GetNamespace(),
 			Name:      obj.GetName(),
@@ -187,11 +196,27 @@ func (r *BaseReconciler) makeEntryForObject(obj ObjectWithMetadata) *common.Regi
 		ParentId: parentId,
 		SpiffeId: spiffeId,
 	}
+	return r.fillEntryForObject(ctx, &entry, obj)
 }
 
 func (r *BaseReconciler) entryEquals(myEntry *common.RegistrationEntry, b *common.RegistrationEntry) bool {
 	// TODO: Maybe this should be stricter on the other fields, but right now if you're editing entries on the server, I'll accept that odd things happen to you.
-	return b.SpiffeId == myEntry.GetSpiffeId()
+	if b.SpiffeId != myEntry.GetSpiffeId() {
+		return false
+	}
+	if len(b.DnsNames) != len(myEntry.DnsNames) {
+		return false
+	}
+	stuff := make(map[string]bool, len(b.DnsNames))
+	for _, thing := range b.DnsNames {
+		stuff[thing] = true
+	}
+	for _, thing := range myEntry.DnsNames {
+		if !stuff[thing] {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *BaseReconciler) deleteAllEntries(ctx context.Context, reqLogger logr.Logger, entries []*common.RegistrationEntry) error {
@@ -302,7 +327,10 @@ func (r *BaseReconciler) pollSpire(out chan event.GenericEvent, s <-chan struct{
 								log.Error(err, "Unable to fetch resource", "name", namespacedName)
 							}
 						} else {
-							myEntry := r.makeEntryForObject(obj)
+							myEntry, err := r.makeEntryForObject(ctx, obj)
+							if err != nil {
+								log.Error(err, "Unable to populate spire entry for object", "name", namespacedName)
+							}
 							if myEntry == nil || !r.entryEquals(myEntry, entry) {
 								// No longer needs an entry or it doesn't match the expected entry
 								// This can trigger for various reasons, but it's OK to accidentally queue more than entirely necessary
@@ -339,16 +367,20 @@ func (p *SpirePoller) Start(s <-chan struct{}) error {
 func (r *BaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	events := make(chan event.GenericEvent)
 
-	err := mgr.Add(&SpirePoller{
+	if err := mgr.Add(&SpirePoller{
 		r:   r,
 		out: events,
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		For(r.getObject()).
-		Watches(&source.Channel{Source: events}, &handler.EnqueueRequestForObject{}).
-		Complete(r)
+		Watches(&source.Channel{Source: events}, &handler.EnqueueRequestForObject{})
+
+	if err := r.ObjectReconciler.SetupWithManager(mgr, builder); err != nil {
+		return err
+	}
+
+	return builder.Complete(r)
 }
