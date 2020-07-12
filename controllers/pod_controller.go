@@ -260,33 +260,36 @@ func (r *PodReconciler) forEachPodEndpointAddress(endpoints *corev1.Endpoints, t
 }
 
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager, builder *ctrlBuilder.Builder) error {
-	builder.Watches(&source.Kind{Type: &corev1.Endpoints{}}, &handler.EnqueueRequestsFromMapFunc{ToRequests: handler.ToRequestsFunc(func(a handler.MapObject) []reconcile.Request {
-		endpoints := a.Object.(*corev1.Endpoints)
+	if r.AddPodDnsNames {
+		builder.Watches(&source.Kind{Type: &corev1.Endpoints{}}, &handler.EnqueueRequestsFromMapFunc{ToRequests: handler.ToRequestsFunc(func(a handler.MapObject) []reconcile.Request {
+			endpoints := a.Object.(*corev1.Endpoints)
 
-		var requests []reconcile.Request
-		r.forEachPodEndpointAddress(endpoints, func(address corev1.EndpointAddress) {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Namespace: address.TargetRef.Namespace,
-					Name:      address.TargetRef.Name,
-				},
+			var requests []reconcile.Request
+			r.forEachPodEndpointAddress(endpoints, func(address corev1.EndpointAddress) {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Namespace: address.TargetRef.Namespace,
+						Name:      address.TargetRef.Name,
+					},
+				})
 			})
+
+			return requests
+		})})
+
+		return mgr.GetFieldIndexer().IndexField(&corev1.Endpoints{}, endpointSubsetAddressReferenceField, func(rawObj runtime.Object) []string {
+			endpoints := rawObj.(*corev1.Endpoints)
+
+			var podNames []string
+
+			r.forEachPodEndpointAddress(endpoints, func(address corev1.EndpointAddress) {
+				podNames = append(podNames, address.TargetRef.Name)
+			})
+
+			return podNames
 		})
-
-		return requests
-	})})
-
-	return mgr.GetFieldIndexer().IndexField(&corev1.Endpoints{}, endpointSubsetAddressReferenceField, func(rawObj runtime.Object) []string {
-		endpoints := rawObj.(*corev1.Endpoints)
-
-		var podNames []string
-
-		r.forEachPodEndpointAddress(endpoints, func(address corev1.EndpointAddress) {
-			podNames = append(podNames, address.TargetRef.Name)
-		})
-
-		return podNames
-	})
+	}
+	return nil
 }
 
 func NewPodReconciler(client client.Client, log logr.Logger, scheme *runtime.Scheme, trustDomain string, rootId string, spireClient registration.RegistrationClient, mode PodReconcilerMode, value string, clusterDnsZone string, addPodDnsNames bool) *BaseReconciler {
