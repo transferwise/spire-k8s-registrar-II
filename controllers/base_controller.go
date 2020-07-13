@@ -94,6 +94,7 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 	if isDeleted {
+		reqLogger.V(1).Info("Deleting entries for deleted object", "count", len(matchedEntries))
 		err := r.deleteAllEntries(ctx, reqLogger, matchedEntries)
 		return ctrl.Result{}, err
 	}
@@ -102,7 +103,7 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	if myEntry == nil {
 		// Object does not need an entry. This might be a change, so we need to delete any hanging entries.
-		reqLogger.V(1).Info("Deleting entries for pod that no longer needs an ID", "count", len(matchedEntries))
+		reqLogger.V(1).Info("Deleting entries for object that no longer needs an ID", "count", len(matchedEntries))
 		err := r.deleteAllEntries(ctx, reqLogger, matchedEntries)
 		return ctrl.Result{}, err
 	}
@@ -115,14 +116,19 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			reqLogger.Error(err, "Failed to create or update spire entry")
 			return ctrl.Result{}, err
 		}
-		if !createEntryIfNotExistsResponse.Preexisting {
-			reqLogger.Info("Created new spire entry", "entry", createEntryIfNotExistsResponse.Entry)
-		} else {
+		if createEntryIfNotExistsResponse.Preexisting {
+			// This can only happen if multiple controllers are running, since any entry returned here should also have
+			// been in matchedEntries!
 			reqLogger.V(1).Info("Found existing identical spire entry", "entry", createEntryIfNotExistsResponse.Entry)
+		} else {
+			reqLogger.Info("Created new spire entry", "entry", createEntryIfNotExistsResponse.Entry)
 		}
 		myEntryId = createEntryIfNotExistsResponse.Entry.EntryId
 	} else {
-		// One of the existing entries might already be just right for me... if not, we can choose one and update it
+		// matchedEntries contains all entries created by this controller (based on parent ID) whose selectors match the object
+		// being reconciled. Typically there will be only one. One of these existing entries might already be just right, but
+		// if not, we choose one and update it (e.g. change spiffe ID or dns names, avoiding causing a period where the workload
+		// has no SVID.) We then delete all the others.
 		requiresUpdate := true
 		for _, entry := range matchedEntries {
 			if r.entryEquals(myEntry, entry) {
@@ -137,11 +143,18 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			// It's important that if multiple instances are running they all pick the same entry here, otherwise
 			// we could have two instances of the registrar delete each others changes. This can only happen if both are
 			// also working off an up to date cache (otherwise the lagging one will pick up the other change later and correct
-			// the mistake.) If that happens then as long as the list of entries is always in the same order, we can guarantee they
-			// wont end up deleting all the entries and not noticing.
-			// TODO: Check that spire-server provides a stable sort order, or sort it ourselves!
-			myEntryId = matchedEntries[0].EntryId
+			// the mistake.) If that happens then as long as they'd both pick the same entry to keep off the list, we can
+			// guarantee they wont end up deleting all the entries and not noticing: so we'll pick the entry with the
+			// "lowest" Entry ID.
+			myEntryId := matchedEntries[0].EntryId
+			for _, entry := range matchedEntries {
+				if entry.EntryId < myEntryId {
+					myEntryId = entry.EntryId
+				}
+			}
 
+			// myEntry is the entry we'd have created if we weren't updating an existing one, by giving it the chosen EntryId
+			// we can use it to update the existing entry to perfectly match what we want.
 			myEntry.EntryId = myEntryId
 			_, err := r.SpireClient.UpdateEntry(ctx, &registration.UpdateEntryRequest{
 				Entry: myEntry,
@@ -182,18 +195,22 @@ func (r *BaseReconciler) entryEquals(myEntry *common.RegistrationEntry, b *commo
 }
 
 func (r *BaseReconciler) deleteAllEntries(ctx context.Context, reqLogger logr.Logger, entries []*common.RegistrationEntry) error {
+	var errs []error
 	for _, entry := range entries {
 		err := r.ensureDeleted(ctx, reqLogger, entry.EntryId)
 		if err != nil {
-			return err
+			errs = append(errs, err)
 		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("unable to delete all entries: %v", errs)
 	}
 	return nil
 }
 
-func (r *BaseReconciler) deleteAllEntriesExcept(ctx context.Context, reqLogger logr.Logger, entries []*common.RegistrationEntry, skip string) error {
+func (r *BaseReconciler) deleteAllEntriesExcept(ctx context.Context, reqLogger logr.Logger, entries []*common.RegistrationEntry, exceptEntryId string) error {
 	for _, entry := range entries {
-		if entry.EntryId != skip {
+		if entry.EntryId != exceptEntryId {
 			err := r.ensureDeleted(ctx, reqLogger, entry.EntryId)
 			if err != nil {
 				return err
