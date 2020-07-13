@@ -106,9 +106,11 @@ func (r *PodReconciler) makeSpiffeId(obj ObjectWithMetadata) string {
 
 func (r *PodReconciler) mungeIp(ip string) string {
 	if strings.Contains(ip, ".") {
+		// IPv4
 		return strings.Replace(ip, ".", "-", -1)
 	}
 	if strings.Contains(ip, ":") {
+		// IPv6
 		return strings.Replace(ip, ":", "-", -1)
 	}
 	return ip
@@ -240,15 +242,15 @@ func (r *PodReconciler) getObject() ObjectWithMetadata {
 	return &corev1.Pod{}
 }
 
-func (r *PodReconciler) forEachPodSubsetEndpointAddress(subset corev1.EndpointSubset, thing func(corev1.EndpointAddress)) {
+func (r *PodReconciler) forEachPodSubsetEndpointAddress(subset corev1.EndpointSubset, action func(corev1.EndpointAddress)) {
 	for _, address := range subset.Addresses {
 		if address.TargetRef != nil && address.TargetRef.Kind == "Pod" {
-			thing(address)
+			action(address)
 		}
 	}
 	for _, address := range subset.NotReadyAddresses {
 		if address.TargetRef != nil && address.TargetRef.Kind == "Pod" {
-			thing(address)
+			action(address)
 		}
 	}
 }

@@ -54,7 +54,7 @@ type ObjectReconciler interface {
 	selectorsToNamespacedName([]*common.Selector) *types.NamespacedName
 	// Fill additional fields on a spire registration entry for a k8s object
 	fillEntryForObject(context.Context, *common.RegistrationEntry, ObjectWithMetadata) (*common.RegistrationEntry, error)
-	// Do any additional manager setup required
+	// Perform any additional manager setup required
 	SetupWithManager(ctrl.Manager, *ctrlBuilder.Builder) error
 }
 
@@ -199,20 +199,22 @@ func (r *BaseReconciler) makeEntryForObject(ctx context.Context, obj ObjectWithM
 	return r.fillEntryForObject(ctx, &entry, obj)
 }
 
-func (r *BaseReconciler) entryEquals(myEntry *common.RegistrationEntry, b *common.RegistrationEntry) bool {
-	// TODO: Maybe this should be stricter on the other fields, but right now if you're editing entries on the server, I'll accept that odd things happen to you.
-	if b.SpiffeId != myEntry.GetSpiffeId() {
+func (r *BaseReconciler) entryEquals(myEntry *common.RegistrationEntry, in *common.RegistrationEntry) bool {
+	// We consider an entry to be "equal" if the fields we can update match.
+	// This doesn't include selectors, since those can never be updated. The caller is expected to only pass us
+	// entries whose selectors would match the same k8s resource.
+	if in.SpiffeId != myEntry.GetSpiffeId() {
 		return false
 	}
-	if len(b.DnsNames) != len(myEntry.DnsNames) {
+	if len(in.DnsNames) != len(myEntry.DnsNames) {
 		return false
 	}
-	stuff := make(map[string]bool, len(b.DnsNames))
-	for _, thing := range b.DnsNames {
-		stuff[thing] = true
+	inDnsNames := make(map[string]bool, len(in.DnsNames))
+	for _, dnsName := range in.DnsNames {
+		inDnsNames[dnsName] = true
 	}
-	for _, thing := range myEntry.DnsNames {
-		if !stuff[thing] {
+	for _, dnsName := range myEntry.DnsNames {
+		if !inDnsNames[dnsName] {
 			return false
 		}
 	}
