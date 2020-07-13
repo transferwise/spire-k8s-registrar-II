@@ -102,6 +102,8 @@ var _ = BeforeSuite(func(done Done) {
 		spireClient,
 		PodReconcilerModeLabel,
 		"spiffe",
+		"",
+		false,
 	).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
