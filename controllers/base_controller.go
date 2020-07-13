@@ -209,13 +209,17 @@ func (r *BaseReconciler) deleteAllEntries(ctx context.Context, reqLogger logr.Lo
 }
 
 func (r *BaseReconciler) deleteAllEntriesExcept(ctx context.Context, reqLogger logr.Logger, entries []*common.RegistrationEntry, exceptEntryId string) error {
+	var errs []error
 	for _, entry := range entries {
 		if entry.EntryId != exceptEntryId {
 			err := r.ensureDeleted(ctx, reqLogger, entry.EntryId)
 			if err != nil {
-				return err
+				errs = append(errs, err)
 			}
 		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("unable to delete all entries: %v", errs)
 	}
 	return nil
 }
