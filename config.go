@@ -36,8 +36,8 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 func ParseConfig(hclConfig string) (*Config, error) {
-	c := new(Config)
-	if err := hcl.Decode(c, hclConfig); err != nil {
+	c := Config{}
+	if err := hcl.Decode(&c, hclConfig); err != nil {
 		return nil, errs.New("unable to decode configuration: %v", err)
 	}
 
@@ -60,5 +60,5 @@ func ParseConfig(hclConfig string) (*Config, error) {
 		c.ControllerName = defaultControllerName
 	}
 
-	return c, nil
+	return &c, nil
 }
