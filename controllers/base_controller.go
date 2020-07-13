@@ -143,7 +143,7 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			// It's important that if multiple instances are running they all pick the same entry here, otherwise
 			// we could have two instances of the registrar delete each others changes. This can only happen if both are
 			// also working off an up to date cache (otherwise the lagging one will pick up the other change later and correct
-			// the mistake.) If that happens then as long as they'd both pick the same entry to keep off the list, we can
+			// the mistake.) If that happens then as long as they'd both pick to keep the same entry from the list, we can
 			// guarantee they wont end up deleting all the entries and not noticing: so we'll pick the entry with the
 			// "lowest" Entry ID.
 			myEntryId := matchedEntries[0].EntryId
