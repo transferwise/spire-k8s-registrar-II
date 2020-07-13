@@ -28,7 +28,7 @@ var _ = Describe("Pod Controller", func() {
 	})
 
 	Context("Pod controller label mode", func() {
-		It("Should create a Spire Entry", func() {
+		It("Should create and delete a Spire Entry", func() {
 			toCreate := testPod(types.NamespacedName{
 				Name:      "test-pod",
 				Namespace: "default",
@@ -43,10 +43,10 @@ var _ = Describe("Pod Controller", func() {
 				entries, err := spireClient.ListBySpiffeID(context.Background(), &registration.SpiffeID{
 					Id: "spiffe://foo.bar.spire/testpod",
 				})
-				if entries == nil {
+				if err != nil {
 					return nil, err
 				}
-				return entries.Entries, err
+				return entries.Entries, nil
 			}, timeout, interval).ShouldNot(BeEmpty())
 
 			By("Deleting the pod")
@@ -57,10 +57,10 @@ var _ = Describe("Pod Controller", func() {
 				entries, err := spireClient.ListBySpiffeID(context.Background(), &registration.SpiffeID{
 					Id: "spiffe://foo.bar.spire/testpod",
 				})
-				if entries == nil {
+				if err != nil {
 					return nil, err
 				}
-				return entries.Entries, err
+				return entries.Entries, nil
 			}, timeout, interval).Should(BeEmpty())
 
 		})

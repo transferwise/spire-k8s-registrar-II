@@ -18,6 +18,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/google/uuid"
 	"github.com/spiffe/spire/proto/spire/api/registration"
 	"github.com/spiffe/spire/proto/spire/common"
@@ -101,8 +102,6 @@ var _ = BeforeSuite(func(done Done) {
 		spireClient,
 		PodReconcilerModeLabel,
 		"spiffe",
-		"",
-		false,
 	).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
@@ -121,12 +120,12 @@ var _ = AfterSuite(func() {
 })
 
 type MockSpireService struct {
-	entriesById        map[string]*common.RegistrationEntry
+	entriesById map[string]*common.RegistrationEntry
 }
 
 func NewMockSpireService() MockSpireService {
 	return MockSpireService{
-		entriesById:        map[string]*common.RegistrationEntry{},
+		entriesById: map[string]*common.RegistrationEntry{},
 	}
 }
 
@@ -175,17 +174,29 @@ func (m MockSpireService) cloneEntry(in *common.RegistrationEntry) (*common.Regi
 }
 
 func (m MockSpireService) CreateEntry(ctx context.Context, in *common.RegistrationEntry, opts ...grpc.CallOption) (*registration.RegistrationEntryID, error) {
-	ceif, err := m.CreateEntryIfNotExists(ctx, in, opts...)
+	entry, err := m.CreateEntryIfNotExists(ctx, in, opts...)
 	if err != nil {
 		return nil, err
 	}
-	if ceif.Preexisting {
+	if entry.Preexisting {
 		return nil, status.Error(codes.AlreadyExists, "Entry already exists")
 	}
-	return &registration.RegistrationEntryID{Id: ceif.Entry.EntryId}, nil
+	return &registration.RegistrationEntryID{Id: entry.Entry.EntryId}, nil
 }
 
 func (m MockSpireService) CreateEntryIfNotExists(ctx context.Context, in *common.RegistrationEntry, opts ...grpc.CallOption) (*registration.CreateEntryIfNotExistsResponse, error) {
+
+	seenSelectors := make(map[string]map[string]bool)
+	for _, selector := range in.Selectors {
+		if _, ok := seenSelectors[selector.Type]; !ok {
+			seenSelectors[selector.Type] = make(map[string]bool)
+		}
+		if seenSelectors[selector.Type][selector.Value] {
+			return nil, fmt.Errorf("duplicate selectors aren't permitted")
+		}
+		seenSelectors[selector.Type][selector.Value] = true
+	}
+
 	e, err := m.getMatchingEntry(in)
 	if err != nil {
 		return nil, err
@@ -244,7 +255,8 @@ func (m MockSpireService) FetchEntry(ctx context.Context, in *registration.Regis
 func (m MockSpireService) FetchEntries(ctx context.Context, in *common.Empty, opts ...grpc.CallOption) (*common.RegistrationEntries, error) {
 	return m.fetchByFilter(func(entry *common.RegistrationEntry) bool {
 		return true
-	})}
+	})
+}
 
 func (m MockSpireService) UpdateEntry(ctx context.Context, in *registration.UpdateEntryRequest, opts ...grpc.CallOption) (*common.RegistrationEntry, error) {
 	panic("implement me")
@@ -261,12 +273,12 @@ func (m MockSpireService) ListBySelector(ctx context.Context, in *common.Selecto
 }
 
 func (m MockSpireService) ListBySelectors(ctx context.Context, in *common.Selectors, opts ...grpc.CallOption) (*common.RegistrationEntries, error) {
-	hunting := make(map[string]map[string]bool)
+	inSelectors := make(map[string]map[string]bool)
 	for _, selector := range in.Entries {
-		if _, ok := hunting[selector.Type]; !ok {
-			hunting[selector.Type] = make(map[string]bool)
+		if _, ok := inSelectors[selector.Type]; !ok {
+			inSelectors[selector.Type] = make(map[string]bool)
 		}
-		hunting[selector.Type][selector.Value] = true
+		inSelectors[selector.Type][selector.Value] = true
 	}
 
 	return m.fetchByFilter(func(entry *common.RegistrationEntry) bool {
@@ -275,7 +287,7 @@ func (m MockSpireService) ListBySelectors(ctx context.Context, in *common.Select
 		}
 
 		for _, selector := range entry.Selectors {
-			if !hunting[selector.Type][selector.Value] {
+			if !inSelectors[selector.Type][selector.Value] {
 				return false
 			}
 		}
