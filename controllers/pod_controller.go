@@ -140,19 +140,25 @@ func (r *PodReconciler) getSelectors(namespacedName types.NamespacedName) []*com
 }
 
 func (r *PodReconciler) getAllEntries(ctx context.Context) ([]*common.RegistrationEntry, error) {
-	nodeEntries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: r.RootId})
+	// Parents for an entry are not guaranteed to exist. This means we cannot do a search by parent ID
+	// starting from rootId to find nodes, then find pods parented to those nodes. Instead we have to
+	// get the full set of entries, and scan them for parentIds that match the format we use for a
+	// node's ID. This is probably faster anyway: most entries in spire are going to be for pods, so we
+	// may as well just load the whole lot.
+	// TODO: Move to some kind of poll and cache and notify system, so multiple controllers don't have to poll.
+	allEntries, err := r.SpireClient.FetchEntries(ctx, &common.Empty{})
 	if err != nil {
 		return nil, err
 	}
-	var allEntries []*common.RegistrationEntry
-	for _, nodeEntry := range nodeEntries.Entries {
-		entries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: nodeEntry.SpiffeId})
-		if err != nil {
-			return nil, err
+	var allPodEntries []*common.RegistrationEntry
+	nodeIdPrefix := fmt.Sprintf("%s/", r.RootId)
+
+	for _, maybePodEntry := range allEntries.Entries {
+		if strings.HasPrefix(maybePodEntry.ParentId, nodeIdPrefix) {
+			allPodEntries = append(allPodEntries, maybePodEntry)
 		}
-		allEntries = append(allEntries, entries.Entries...)
 	}
-	return allEntries, nil
+	return allPodEntries, nil
 }
 
 func (r *PodReconciler) getObject() ObjectWithMetadata {
