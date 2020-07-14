@@ -11,6 +11,7 @@ const (
 	defaultLogLevel       = "info"
 	defaultMetricsAddr    = ":8080"
 	defaultControllerName = "spire-k8s-registrar"
+	defaultClusterDnsZone = "cluster.local"
 )
 
 type Config struct {
@@ -25,6 +26,8 @@ type Config struct {
 	PodAnnotation   string `hcl:"pod_annotation"`
 	LeaderElection  bool   `hcl:"leader_election"`
 	ControllerName  string `hcl:"controller_name"`
+	AddPodDnsNames  bool   `hcl:"add_pod_dns_names"`
+	ClusterDnsZone  string `hcl:"cluster_dns_zone"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -58,6 +61,9 @@ func ParseConfig(hclConfig string) (*Config, error) {
 	}
 	if c.ControllerName == "" {
 		c.ControllerName = defaultControllerName
+	}
+	if c.ClusterDnsZone == "" {
+		c.ClusterDnsZone = defaultClusterDnsZone
 	}
 
 	return &c, nil
