@@ -111,7 +111,11 @@ func (r *BaseReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	}
 
 	if myEntry == nil {
-		// Object does not need an entry. This might be a change, so we need to delete any hanging entries.
+		// Object does not need an entry.
+		if len(matchedEntries) == 0 {
+			return ctrl.Result{}, nil
+		}
+		// Object had entries before, but doesn't need them now. Delete them.
 		reqLogger.V(1).Info("Deleting entries for object that no longer needs an ID", "count", len(matchedEntries))
 		err := r.deleteAllEntries(ctx, reqLogger, matchedEntries)
 		return ctrl.Result{}, err
@@ -206,6 +210,9 @@ func (r *BaseReconciler) entryEquals(myEntry *common.RegistrationEntry, in *comm
 	if in.SpiffeId != myEntry.GetSpiffeId() {
 		return false
 	}
+	if in.ParentId != myEntry.GetParentId() {
+		return false
+	}
 	if len(in.DnsNames) != len(myEntry.DnsNames) {
 		return false
 	}
@@ -261,7 +268,7 @@ func (r *BaseReconciler) getMatchingEntries(ctx context.Context, reqLogger logr.
 	}
 	var result []*common.RegistrationEntry
 	for _, entry := range entries.Entries {
-		if strings.HasPrefix(entry.ParentId, r.RootId) {
+		if strings.HasPrefix(entry.ParentId, r.RootId) || strings.HasPrefix(entry.SpiffeId, r.RootId) {
 			result = append(result, entry)
 		}
 	}

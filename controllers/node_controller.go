@@ -34,12 +34,15 @@ import (
 type NodeReconciler struct {
 	RootId      string
 	SpireClient registration.RegistrationClient
+	Cluster     string
+	ServerId    string
 }
 
 type NodeSelectorSubType string
 
 const (
 	NodeNameSelector NodeSelectorSubType = "agent_node_name"
+	ClusterSelector  NodeSelectorSubType = "cluster"
 )
 
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
@@ -49,21 +52,31 @@ func (r *NodeReconciler) makeSpiffeId(obj ObjectWithMetadata) string {
 }
 
 func (r *NodeReconciler) makeParentId(_ ObjectWithMetadata) string {
-	return r.RootId
+	return r.ServerId
 }
 
 func (r *NodeReconciler) getSelectors(namespacedName types.NamespacedName) []*common.Selector {
 	return []*common.Selector{
 		r.k8sNodeSelector(NodeNameSelector, namespacedName.Name),
+		r.k8sNodeSelector(ClusterSelector, r.Cluster),
 	}
 }
 
 func (r *NodeReconciler) getAllEntries(ctx context.Context) ([]*common.RegistrationEntry, error) {
-	entries, err := r.SpireClient.ListByParentID(ctx, &registration.ParentID{Id: r.RootId})
+	// TODO: Move to some kind of poll and cache and notify system, so multiple controllers don't have to poll.
+	allEntries, err := r.SpireClient.FetchEntries(ctx, &common.Empty{})
 	if err != nil {
 		return nil, err
 	}
-	return entries.Entries, nil
+	var allNodeEntries []*common.RegistrationEntry
+	nodeIdPrefix := fmt.Sprintf("%s/", r.RootId)
+
+	for _, maybeNodeEntry := range allEntries.Entries {
+		if maybeNodeEntry.ParentId == r.ServerId && strings.HasPrefix(maybeNodeEntry.SpiffeId, nodeIdPrefix) {
+			allNodeEntries = append(allNodeEntries, maybeNodeEntry)
+		}
+	}
+	return allNodeEntries, nil
 }
 
 func (r *NodeReconciler) getObject() ObjectWithMetadata {
@@ -101,7 +114,7 @@ func (r *NodeReconciler) SetupWithManager(_ ctrl.Manager, _ *ctrlBuilder.Builder
 	return nil
 }
 
-func NewNodeReconciler(client client.Client, log logr.Logger, scheme *runtime.Scheme, trustDomain string, rootId string, spireClient registration.RegistrationClient) *BaseReconciler {
+func NewNodeReconciler(client client.Client, log logr.Logger, scheme *runtime.Scheme, trustDomain string, serverId string, cluster string, rootId string, spireClient registration.RegistrationClient) *BaseReconciler {
 	return &BaseReconciler{
 		Client:      client,
 		Scheme:      scheme,
@@ -112,6 +125,8 @@ func NewNodeReconciler(client client.Client, log logr.Logger, scheme *runtime.Sc
 		ObjectReconciler: &NodeReconciler{
 			RootId:      rootId,
 			SpireClient: spireClient,
+			Cluster:     cluster,
+			ServerId:    serverId,
 		},
 	}
 }
