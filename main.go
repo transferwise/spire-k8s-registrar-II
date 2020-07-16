@@ -21,9 +21,6 @@ import (
 	"fmt"
 	"github.com/go-logr/logr"
 	"github.com/spiffe/spire/proto/spire/api/registration"
-	"github.com/spiffe/spire/proto/spire/common"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"net/url"
 	"os"
 	"path"
@@ -77,11 +74,7 @@ func main() {
 	}
 	setupLog.Info("Connected to spire server.")
 
-	rootId, err := makeRootId(context.Background(), setupLog, spireClient, config.Cluster, config.ControllerName, config.TrustDomain)
-	if err != nil {
-		setupLog.Error(err, "Unable to create parent ID")
-		os.Exit(1)
-	}
+	rootId := nodeID(config.TrustDomain, config.ControllerName, config.Cluster)
 
 	// Setup all Controllers
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -99,6 +92,8 @@ func main() {
 		ctrl.Log.WithName("controllers").WithName("Node"),
 		mgr.GetScheme(),
 		config.TrustDomain,
+		ServerID(config.TrustDomain),
+		config.Cluster,
 		rootId,
 		spireClient,
 	).SetupWithManager(mgr); err != nil {
@@ -208,24 +203,4 @@ func makeID(trustDomain string, pathFmt string, pathArgs ...interface{}) string 
 
 func nodeID(trustDomain string, controllerName string, cluster string) string {
 	return makeID(trustDomain, "%s/%s/node", controllerName, cluster)
-}
-
-func makeRootId(ctx context.Context, reqLogger logr.Logger, spireClient registration.RegistrationClient, cluster string, controllerName string, trustDomain string) (string, error) {
-	rootId := nodeID(trustDomain, controllerName, cluster)
-	reqLogger.Info("Initializing operator parent ID.")
-	_, err := spireClient.CreateEntry(ctx, &common.RegistrationEntry{
-		Selectors: []*common.Selector{
-			{Type: "k8s_psat", Value: fmt.Sprintf("cluster:%s", cluster)},
-		},
-		ParentId: ServerID(trustDomain),
-		SpiffeId: rootId,
-	})
-	if err != nil {
-		if status.Code(err) != codes.AlreadyExists {
-			reqLogger.Info("Failed to create operator parent ID", "spiffeID", rootId)
-			return "", err
-		}
-	}
-	reqLogger.Info("Initialized operator parent ID", "spiffeID", rootId)
-	return rootId, nil
 }
