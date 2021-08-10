@@ -1,5 +1,7 @@
 # SPIRE Kubernetes Workload Registrar
 
+**NOTE: This repository is now archived, with its features upstreamed into https://github.com/spiffe/spire/blob/main/support/k8s/k8s-workload-registrar/. See https://docs.google.com/document/d/1DGHVw3n3w1YrXzGazjx-Qw6Mi44eoaSUJyqQuRqbyec for history.**
+
 The SPIRE Kubernetes Workload Registrar implements a Kubernetes
 Controller that facilitates automatic workload registration
 within Kubernetes.
